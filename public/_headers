@@ -1,0 +1,8 @@
+/sw.js
+    cache-control: no-cache
+/
+    cache-control: no-cache
+/index.html
+    cache-control: no-cache
+/manifest.webmanifest
+    cache-control: no-cache

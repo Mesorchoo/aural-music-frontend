@@ -1,0 +1,21 @@
+
+* {
+  box-sizing:border-box;
+}
+
+:root {
+  background-color:#111;
+  
+  /* height:calc(100% - env(safe-area-inset-top) - env(safe-area-inset-bottom)); */
+  height:100%;
+  padding:0;
+  margin:0;
+  /* height:100%; */
+  /* margin-top:env(safe-area-inset-top); */
+}
+
+body {
+  height:100%;
+  margin:0;
+  font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+}

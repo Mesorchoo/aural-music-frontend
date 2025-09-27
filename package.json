@@ -1,0 +1,23 @@
+{
+  "name": "aural",
+  "version": "0.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "vite --host 0.0.0.0",
+    "build": "vite build",
+    "preview": "vite preview",
+    "deploy": "wrangler pages publish dist"
+  },
+  "dependencies": {
+    "album-art": "^1.0.4",
+    "pinia": "^2.0.36",
+    "vite-plugin-pwa": "^0.16.1",
+    "vue": "^3.3.2",
+    "vue-router": "^4.2.0",
+    "workbox": "^0.0.0"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-vue": "^4.2.3",
+    "vite": "^4.3.5"
+  }
+}
