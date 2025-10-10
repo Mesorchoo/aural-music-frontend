@@ -333,9 +333,11 @@ async function sync_tracks() {
             let cursor = await db.transaction('tracks').store.index('artist_album').openCursor(range)
             
             const tracks = []
+            const existing_album_art = null;
             while(cursor) {
                 console.log(cursor.value)
                 tracks.push(cursor.value.path)
+                existing_album_art = cursor.value.cover_art;
                 cursor = await cursor.continue()
             }
                      
@@ -351,7 +353,8 @@ async function sync_tracks() {
                 let art = '';
                 if(album.cover_art){
                     art = `${root_url}/${album.cover_art}`;
-                } else {
+                    // Only check spotify if the stored album doesnt already have cover_art
+                } else if(!existing_album_art) {
                     try {
                     art = await albumArt(artist.artist, { album: album.album})
                     } catch(e) {
