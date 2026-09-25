@@ -1,11 +1,34 @@
 <script setup>
-import { reactive, watch, ref, computed, onMounted } from 'vue';
+import { reactive, watch, ref, computed, onMounted, provide, nextTick } from 'vue';
 import { usePlaylistStore } from '../stores/playlist';
-import { RouterLink, RouterView } from 'vue-router'
+import { RouterLink, RouterView, useRoute, onBeforeRouteUpdate, onBeforeRouteLeave } from 'vue-router'
 import logoURL from '@/assets/logo.webp'
 import { setSetting, getSetting } from '../indexeddb';
+import { songUrl } from '../song_url';
 
 const playlistStore = usePlaylistStore()
+
+// Remember each page's scroll position, so going back to a list returns to the same place.
+// Kept in sessionStorage so it also survives the reload after an app update.
+const pageContent = ref()
+const route = useRoute()
+const SCROLL_KEY = 'scroll_positions'
+let scrollPositions = {}
+try { scrollPositions = JSON.parse(sessionStorage.getItem(SCROLL_KEY)) || {} } catch {}
+
+function saveScroll(path) {
+  if (!pageContent.value) return
+  scrollPositions[path] = pageContent.value.scrollTop
+  try { sessionStorage.setItem(SCROLL_KEY, JSON.stringify(scrollPositions)) } catch {}
+}
+onBeforeRouteUpdate((to, from) => saveScroll(from.fullPath))
+onBeforeRouteLeave((to, from) => saveScroll(from.fullPath))
+
+// Pages load their lists asynchronously, so they call this once the list has rendered
+provide('restoreScroll', async () => {
+  await nextTick()
+  if (pageContent.value) pageContent.value.scrollTop = scrollPositions[route.fullPath] || 0
+})
 
 const playlist = computed(() => playlistStore.playlist)
 
@@ -24,7 +47,7 @@ watch(playlist.value, async () => {
   art.value = playlist.value.current.cover_art
   
   const root_url = await getSetting('aural_backend_url') || '';
-  audio.value.querySelector('source').src = `${root_url}/song/${playlist.value.current.path}`
+  audio.value.querySelector('source').src = songUrl(root_url, playlist.value.current.path)
   audio.value.load()
   audio.value.play()
 });
@@ -64,12 +87,9 @@ onMounted(() => {
       document.title = `🎵 ${playlist.value.current.path} - Music`;
 
       if(playlist.value.list.length > 1) {
-        try {
-            const root_url = await getSetting('aural_backend_url') || '';
-          fetch(`${root_url}/song/${playlist.value.list[1].path}`)
-        } catch (error) {
-
-        }
+        // Prefetch the next track so it's cached; failures don't matter here
+        const root_url = await getSetting('aural_backend_url') || '';
+        fetch(songUrl(root_url, playlist.value.list[1].path)).catch(() => {})
       }
 
 
@@ -80,8 +100,6 @@ onMounted(() => {
         artwork: [
           {
             src: playlist.value.current.cover_art,
-            sizes: "300x300",
-            type: "image/jpeg",
           },
         ],
       });
@@ -133,8 +151,9 @@ onMounted(() => {
         </p>
       </div>
     </section>
-    <section class="page-content">      
-      <RouterView v-if="mounted" :current_track_status="current_track_status" />
+    <section class="page-content" ref="pageContent">
+      <!-- Keyed so each artist/album gets a fresh page that loads its own data -->
+      <RouterView v-if="mounted" :key="route.fullPath" :current_track_status="current_track_status" />
     </section>
     <section id="page-footer">
       <!--BLANK-->
@@ -172,6 +191,8 @@ main>section {
 .page-content {
   display:flex;
   flex-direction:column;
+  /* Lets pages size things (like the artist A–Z index) to the visible area with cqh */
+  container-type:size;
 }
 .page-content>:first-child {
   flex:1;
