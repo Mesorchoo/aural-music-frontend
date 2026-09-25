@@ -1,18 +1,10 @@
 <script setup>
-<<<<<<< HEAD
-import { watch, ref, computed, onMounted, onUnmounted } from 'vue';
-=======
-import { reactive, watch, ref, computed, onMounted, provide, nextTick } from 'vue';
->>>>>>> a251a88004ce5fc7220c51e46061c52e6c757cf3
+import { watch, ref, computed, onMounted, onUnmounted, provide, nextTick } from 'vue';
 import { usePlaylistStore } from '../stores/playlist';
 import { RouterLink, RouterView, useRoute, onBeforeRouteUpdate, onBeforeRouteLeave } from 'vue-router'
 import logoURL from '@/assets/logo.webp'
-<<<<<<< HEAD
 import { getSetting } from '../indexeddb';
-=======
-import { setSetting, getSetting } from '../indexeddb';
 import { songUrl } from '../song_url';
->>>>>>> a251a88004ce5fc7220c51e46061c52e6c757cf3
 
 const playlistStore = usePlaylistStore()
 
@@ -60,8 +52,9 @@ function setMediaMetadata() {
     title,
     artist: track.artist || title,
     album: track.album || '',
+    // No type/sizes: art can be jpg or webp, so let the browser detect them
     artwork: track.cover_art ? [
-      { src: track.cover_art, sizes: '300x300', type: 'image/jpeg' },
+      { src: track.cover_art },
     ] : [],
   })
 }
@@ -146,21 +139,6 @@ onMounted(() => {
         const root_url = await getSetting('aural_backend_url') || '';
         fetch(songUrl(root_url, playlist.value.list[1].path)).catch(() => {})
       }
-<<<<<<< HEAD
-=======
-
-
-      navigator.mediaSession.metadata = new window.MediaMetadata({
-        title: playlist.value.current.path.replace(/.*\/.*\/[0-9]+ ?(.*)\..+/, '$1'),
-        artist: playlist.value.current.path.replace(/(.*)\/.*\/[0-9]+ ?.*\..+/, '$1'),
-        album: playlist.value.current.path.replace(/.*\/(.*)\/[0-9]+ ?.*\..+/, '$1'),
-        artwork: [
-          {
-            src: playlist.value.current.cover_art,
-          },
-        ],
-      });
->>>>>>> a251a88004ce5fc7220c51e46061c52e6c757cf3
     });
 
     navigator.mediaSession.setActionHandler("play", () => {
@@ -225,20 +203,16 @@ onUnmounted(() => {
         </p>
       </div>
     </section>
-<<<<<<< HEAD
-    <section class="page-content">      
+    <section class="page-content" ref="pageContent">
       <RouterView v-if="mounted">
         <template #default="{ Component }">
+          <!-- The artist list stays alive between visits. Keyed so each artist/album
+               gets a fresh page that loads its own data -->
           <KeepAlive include="ArtistsView">
-            <component :is="Component" :current_track_status="current_track_status" />
+            <component :is="Component" :key="route.fullPath" :current_track_status="current_track_status" />
           </KeepAlive>
         </template>
       </RouterView>
-=======
-    <section class="page-content" ref="pageContent">
-      <!-- Keyed so each artist/album gets a fresh page that loads its own data -->
-      <RouterView v-if="mounted" :key="route.fullPath" :current_track_status="current_track_status" />
->>>>>>> a251a88004ce5fc7220c51e46061c52e6c757cf3
     </section>
     <section id="page-footer">
       <!--BLANK-->
