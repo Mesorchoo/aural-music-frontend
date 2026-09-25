@@ -1,9 +1,12 @@
 <template>
     <div class="artists">
         <div class="groups">
-            <section v-for="group in groups" :key="group.letter" :id="`letter-${group.letter}`">
+            <!-- Letter in the left margin, sticking at the top while its section scrolls past -->
+            <section v-for="group in groups" :key="group.letter" :id="`letter-${group.letter}`" class="group">
                 <h2 class="letter">{{ group.letter }}</h2>
-                <RouterLink v-for="artist in group.artists" :key="artist" class="artist" :to="{ name: 'artist', params: { artist: artist }}">{{ artist }}</RouterLink>
+                <div class="rows">
+                    <RouterLink v-for="artist in group.artists" :key="artist" class="artist" :to="{ name: 'artist', params: { artist: artist }}">{{ artist }}</RouterLink>
+                </div>
             </section>
             <p v-if="state.loaded && !state.artists.length" class="empty">
                 No music yet. Set the backend URL and token in <RouterLink :to="{ name: 'settings' }">settings</RouterLink>, then sync.
@@ -99,27 +102,40 @@ onActivated(() => {
 .artists {
     display:grid;
     grid-template-columns: 1fr auto;
-    padding:1rem 0 2rem min(2rem, 2vw);
+    padding:1rem 0 2rem;
+}
+
+.group {
+    display:grid;
+    grid-template-columns:3rem 1fr;
+}
+.group + .group .rows {
+    border-top:solid 1px #fff2;
 }
 
 .letter {
     position:sticky;
     top:0;
-    z-index:1;
+    align-self:start;
+    height:3rem;
     margin:0;
-    padding:0.75rem 1rem 0.25rem;
-    font-size:0.8rem;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    font-size:1.1rem;
     font-weight:600;
     color:#fff8;
-    background-color:#111c;
-    backdrop-filter:blur(8px);
+}
+
+.rows {
+    min-width:0;
 }
 
 a.artist {
     display:flex;
     align-items:center;
     min-height:3rem;
-    padding:0.5rem 1rem;
+    padding:0.5rem 0.75rem;
     font-size:1.05rem;
     color:#fff;
     text-decoration: none;
