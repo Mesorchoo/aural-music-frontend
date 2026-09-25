@@ -333,7 +333,7 @@ async function sync_tracks() {
             let cursor = await db.transaction('tracks').store.index('artist_album').openCursor(range)
             
             const tracks = []
-            const existing_album_art = null;
+            let existing_album_art = null;
             while(cursor) {
                 console.log(cursor.value)
                 tracks.push(cursor.value.path)

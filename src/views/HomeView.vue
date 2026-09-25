@@ -1,9 +1,9 @@
 <script setup>
-import { reactive, watch, ref, computed, onMounted } from 'vue';
+import { watch, ref, computed, onMounted, onUnmounted } from 'vue';
 import { usePlaylistStore } from '../stores/playlist';
 import { RouterLink, RouterView } from 'vue-router'
 import logoURL from '@/assets/logo.webp'
-import { setSetting, getSetting } from '../indexeddb';
+import { getSetting } from '../indexeddb';
 
 const playlistStore = usePlaylistStore()
 
@@ -19,9 +19,39 @@ const art = ref(logoURL)
 
 const current_track_status = ref(null)
 
+let positionStateTimer = null
+
+function setMediaMetadata() {
+  const track = playlist.value.current
+  if (!track || !track.path) return
+  const title = track.path.replace(/.*\/.*\/[0-9]+ ?(.*)\..+/, '$1')
+  navigator.mediaSession.metadata = new MediaMetadata({
+    title,
+    artist: track.artist || title,
+    album: track.album || '',
+    artwork: track.cover_art ? [
+      { src: track.cover_art, sizes: '300x300', type: 'image/jpeg' },
+    ] : [],
+  })
+}
+
+function updatePositionState() {
+  if ('setPositionState' in navigator.mediaSession && audio.value) {
+    navigator.mediaSession.setPositionState({
+      duration: audio.value.duration || 0,
+      playbackRate: audio.value.playbackRate || 1,
+      position: audio.value.currentTime || 0,
+    })
+  }
+}
+
+function songTitle(path) {
+  return path.replace(/.*\/.*\/[0-9]+ ?(.*)\..+/, '$1')
+}
 
 watch(playlist.value, async () => {
   art.value = playlist.value.current.cover_art
+  setMediaMetadata()
   
   const root_url = await getSetting('aural_backend_url') || '';
   audio.value.querySelector('source').src = `${root_url}/song/${playlist.value.current.path}`
@@ -52,16 +82,33 @@ onMounted(() => {
       current_track_status.value = 'paused'
       navigator.mediaSession.playbackState = 'paused'
   });
+  audio.value.addEventListener("error", (error) => {
+    console.error("Audio playback error:", error);
+  });
   audio.value.addEventListener("ended", () => {
     current_track_status.value = 'stopped'
       navigator.mediaSession.playbackState = 'none'
     playlistStore.nextSong()
   });
+  audio.value.addEventListener("loadedmetadata", () => {
+    updatePositionState()
+  });
+  audio.value.addEventListener("timeupdate", () => {
+    if (!positionStateTimer) {
+      positionStateTimer = setTimeout(() => {
+        positionStateTimer = null
+        updatePositionState()
+      }, 1000)
+    }
+  });
     audio.value.addEventListener("playing", async () => {
       // Update page title
       current_track_status.value = 'playing'
       navigator.mediaSession.playbackState = 'playing'
-      document.title = `🎵 ${playlist.value.current.path} - Music`;
+      document.title = `\u{1F3B5} ${songTitle(playlist.value.current.path)} - Music`;
+
+      setMediaMetadata()
+      updatePositionState()
 
       if(playlist.value.list.length > 1) {
         try {
@@ -71,20 +118,6 @@ onMounted(() => {
 
         }
       }
-
-
-      navigator.mediaSession.metadata = new window.MediaMetadata({
-        title: playlist.value.current.path.replace(/.*\/.*\/[0-9]+ ?(.*)\..+/, '$1'),
-        artist: playlist.value.current.path.replace(/(.*)\/.*\/[0-9]+ ?.*\..+/, '$1'),
-        album: playlist.value.current.path.replace(/.*\/(.*)\/[0-9]+ ?.*\..+/, '$1'),
-        artwork: [
-          {
-            src: playlist.value.current.cover_art,
-            sizes: "300x300",
-            type: "image/jpeg",
-          },
-        ],
-      });
     });
 
     navigator.mediaSession.setActionHandler("play", () => {
@@ -94,11 +127,27 @@ onMounted(() => {
       audio.value.pause();
     });
     navigator.mediaSession.setActionHandler('previoustrack', () => {
-      // this.$store.commit('prevPlaylist')
+      playlistStore.prevSong()
     });
     navigator.mediaSession.setActionHandler('nexttrack', () => {
-      // this.$store.commit('continuePlaylist')
+      playlistStore.nextSong()
     });
+    navigator.mediaSession.setActionHandler('seekto', (details) => {
+      audio.value.currentTime = details.seekTime
+    });
+    navigator.mediaSession.setActionHandler('seekbackward', () => {
+      audio.value.currentTime = Math.max(0, audio.value.currentTime - 10)
+    });
+    navigator.mediaSession.setActionHandler('seekforward', () => {
+      audio.value.currentTime = Math.min(audio.value.duration || 0, audio.value.currentTime + 10)
+    });
+})
+
+onUnmounted(() => {
+  if (positionStateTimer) {
+    clearTimeout(positionStateTimer)
+    positionStateTimer = null
+  }
 })
 
 </script>
@@ -134,7 +183,13 @@ onMounted(() => {
       </div>
     </section>
     <section class="page-content">      
-      <RouterView v-if="mounted" :current_track_status="current_track_status" />
+      <RouterView v-if="mounted">
+        <template #default="{ Component }">
+          <KeepAlive include="ArtistsView">
+            <component :is="Component" :current_track_status="current_track_status" />
+          </KeepAlive>
+        </template>
+      </RouterView>
     </section>
     <section id="page-footer">
       <!--BLANK-->

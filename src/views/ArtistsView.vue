@@ -7,7 +7,10 @@
 </template>
 
 <script setup>
-import { reactive, onBeforeMount, onBeforeUnmount } from 'vue'
+import { reactive, onBeforeMount, onBeforeUnmount, onActivated } from 'vue'
+import { defineOptions } from 'vue'
+
+defineOptions({ name: 'ArtistsView' })
 
 const state = reactive({
     artists: []
@@ -39,6 +42,14 @@ onBeforeMount(() => {
 
 onBeforeUnmount(() => {
     navigator.serviceWorker.removeEventListener('message', onArtistUpdate)
+});
+
+onActivated(() => {
+    navigator.serviceWorker.ready.then( registration => {
+        registration.active.postMessage({
+            action: 'get_artists'
+        });
+    })
 });
 
 </script>

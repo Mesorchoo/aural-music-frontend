@@ -24,5 +24,12 @@ export const usePlaylistStore = defineStore('playlist', () => {
     playlist.value.current = playlist.value.list[0]
   }
 
-  return { playlist, addToPlaylist, nextSong }
+  function prevSong(){
+    const m = playlist.value.list.pop()
+    playlist.value.list.unshift(m)
+    playlist.value.list.sort()
+    playlist.value.current = playlist.value.list[0]
+  }
+
+  return { playlist, addToPlaylist, nextSong, prevSong }
 })
