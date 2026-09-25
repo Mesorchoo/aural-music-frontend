@@ -1,8 +1,21 @@
 <template>
     <div class="album">
-        <template v-for="track in state.tracks">
+        <header>
+            <div class="cover">
+                <img v-if="coverArt && !state.brokenArt" :src="coverArt" alt="" @error="state.brokenArt = true">
+                <span v-else class="placeholder" aria-hidden="true">{{ props.album[0] }}</span>
+            </div>
+            <div class="titles">
+                <h1>{{ props.album }}</h1>
+                <RouterLink class="artist-link" :to="{ name: 'artist', params: { artist: props.artist } }">{{ props.artist }}</RouterLink>
+                <p v-if="state.loaded" class="count">{{ state.tracks.length }} {{ state.tracks.length === 1 ? 'track' : 'tracks' }}</p>
+            </div>
+        </header>
+
+        <template v-for="track in state.tracks" :key="track.path">
             <button type="button" @click="play(track)" @touchstart="touchstart(track)" @touchend="touchend(track)" :class="{ playing: playlist.current.path == track.path }">
-                {{ track.path.replace(/.*\/.*\/([0-9]+).? ?(.*)\..+/, '$1 $2') }}
+                <span class="number">{{ trackParts(track).number }}</span>
+                <span class="title">{{ trackParts(track).title }}</span>
                 <template v-if="playlist.current.path == track.path">
                     <span v-if="props.current_track_status === 'playing'" class="playing_indicator"></span>
                     <span v-else-if="props.current_track_status === 'paused'" class="paused_indicator"></span>
@@ -24,9 +37,10 @@
 </template>
 
 <script setup>
-import { reactive, computed, onBeforeMount, onBeforeUnmount } from 'vue'
+import { reactive, computed, inject, onBeforeMount, onBeforeUnmount } from 'vue'
 import { usePlaylistStore } from '../stores/playlist';
 import { setSetting, getSetting } from '../indexeddb';
+import { songUrl } from '../song_url';
 
 const playlistStore = usePlaylistStore()
 
@@ -38,14 +52,27 @@ const props = defineProps({
     current_track_status: null
 });
 
+const restoreScroll = inject('restoreScroll', () => {})
+
 const state = reactive({
     tracks: [],
+    loaded: false,
+    brokenArt: false,
     touch: {
         start: 0,
         end: 0,
         track: null,
     }
 });
+
+const coverArt = computed(() => state.tracks[0]?.cover_art)
+
+// "01 - Song Name.flac" -> { number: '1', title: 'Song Name' }
+function trackParts(track) {
+    const match = track.track.match(/^([0-9]+)[\s.\-_]*(.*?)\.[^.]+$/)
+    if (match && match[2]) return { number: String(parseInt(match[1], 10)), title: match[2] }
+    return { number: '', title: track.track.replace(/\.[^.]+$/, '') }
+}
 
 function touchstart(track) {
     state.touch.start = Date.now()
@@ -60,20 +87,15 @@ async function touchend(track) {
 
             const root_url = await getSetting('aural_backend_url') || '';
             
-            caches.open('song').then(cache => cache.match(`${root_url}/song/${track.path}`)).then((req, key) => {
-                console.log('req', req, key)
-                // delete it
-                caches.open('song').then(cache => cache.delete(`${root_url}/song/${track.path}`));
-                
-                navigator.serviceWorker.ready.then( registration => {
-                    registration.active.postMessage({
-                        action: 'get_artist_album',
-                        artist: props.artist,
-                        album: props.album,
-                    });
-                })
+            await caches.open('song').then(cache => cache.delete(songUrl(root_url, track.path)));
 
-            });
+            navigator.serviceWorker.ready.then( registration => {
+                registration.active.postMessage({
+                    action: 'get_artist_album',
+                    artist: props.artist,
+                    album: props.album,
+                });
+            })
         }
     }
 }
@@ -88,7 +110,10 @@ function play(track) {
 function onAlbumUpdate(event){
     console.info('From SW', event.data)
     if(event.data.type === 'artist_album' && event.data.artist === props.artist && event.data.album === props.album) {
+        const firstLoad = !state.loaded
         state.tracks = event.data.tracks
+        state.loaded = true
+        if (firstLoad) restoreScroll()
     }
     if(event.data.type === 'cache_update') {
         navigator.serviceWorker.ready.then( registration => {
@@ -124,7 +149,63 @@ onBeforeUnmount(() => {
     display:flex;
     flex-direction: column;
     /* gap:0.25rem; */
-    padding:2rem min(2rem, 2vw);
+    padding:1.5rem min(2rem, 2vw) 2rem;
+}
+
+header {
+    display:flex;
+    gap:1rem;
+    align-items:flex-end;
+    margin:0 0 1rem;
+    padding:0 min(1rem, 2vw);
+    color:#fff;
+}
+.cover {
+    flex:0 0 auto;
+    width:clamp(5rem, 28vw, 8rem);
+    aspect-ratio:1;
+    border-radius:0.5rem;
+    overflow:hidden;
+    background-color:#fff1;
+    box-shadow:0 0.5rem 1.5rem #0006;
+}
+.cover img {
+    width:100%;
+    height:100%;
+    object-fit:cover;
+    display:block;
+}
+.placeholder {
+    width:100%;
+    height:100%;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    font-size:2.5rem;
+    font-weight:600;
+    color:#fff5;
+    background-image:linear-gradient(135deg, #fff2, #fff0);
+}
+.titles {
+    min-width:0;
+}
+h1 {
+    margin:0;
+    font-size:1.35rem;
+    font-weight:600;
+    line-height:1.2;
+    overflow-wrap:anywhere;
+}
+.artist-link {
+    display:inline-block;
+    margin-top:0.25rem;
+    color:#fffc;
+    text-decoration:none;
+}
+.count {
+    margin:0.25rem 0 0;
+    font-size:0.85rem;
+    color:#fff9;
 }
 
 
@@ -132,13 +213,25 @@ button {
     background-color: #0000;
     border:none;
     font-size:min(1rem, 4vw);
-    padding:0.75rem 1rem;
+    min-height:3rem;
+    padding:0.5rem 1rem;
     color:#fff;
     text-align:left;
     border-bottom:solid 1px #fff1;
-    display:flex;
-    justify-content: space-between;
+    display:grid;
+    grid-template-columns:1.75rem 1fr auto;
+    gap:0.5rem;
     align-items: center;
+}
+.number {
+    color:#fff8;
+    font-variant-numeric:tabular-nums;
+}
+.title {
+    min-width:0;
+    overflow:hidden;
+    text-overflow:ellipsis;
+    white-space:nowrap;
 }
 
 .playing {

@@ -1,11 +1,42 @@
 <script setup>
+<<<<<<< HEAD
 import { watch, ref, computed, onMounted, onUnmounted } from 'vue';
+=======
+import { reactive, watch, ref, computed, onMounted, provide, nextTick } from 'vue';
+>>>>>>> a251a88004ce5fc7220c51e46061c52e6c757cf3
 import { usePlaylistStore } from '../stores/playlist';
-import { RouterLink, RouterView } from 'vue-router'
+import { RouterLink, RouterView, useRoute, onBeforeRouteUpdate, onBeforeRouteLeave } from 'vue-router'
 import logoURL from '@/assets/logo.webp'
+<<<<<<< HEAD
 import { getSetting } from '../indexeddb';
+=======
+import { setSetting, getSetting } from '../indexeddb';
+import { songUrl } from '../song_url';
+>>>>>>> a251a88004ce5fc7220c51e46061c52e6c757cf3
 
 const playlistStore = usePlaylistStore()
+
+// Remember each page's scroll position, so going back to a list returns to the same place.
+// Kept in sessionStorage so it also survives the reload after an app update.
+const pageContent = ref()
+const route = useRoute()
+const SCROLL_KEY = 'scroll_positions'
+let scrollPositions = {}
+try { scrollPositions = JSON.parse(sessionStorage.getItem(SCROLL_KEY)) || {} } catch {}
+
+function saveScroll(path) {
+  if (!pageContent.value) return
+  scrollPositions[path] = pageContent.value.scrollTop
+  try { sessionStorage.setItem(SCROLL_KEY, JSON.stringify(scrollPositions)) } catch {}
+}
+onBeforeRouteUpdate((to, from) => saveScroll(from.fullPath))
+onBeforeRouteLeave((to, from) => saveScroll(from.fullPath))
+
+// Pages load their lists asynchronously, so they call this once the list has rendered
+provide('restoreScroll', async () => {
+  await nextTick()
+  if (pageContent.value) pageContent.value.scrollTop = scrollPositions[route.fullPath] || 0
+})
 
 const playlist = computed(() => playlistStore.playlist)
 
@@ -54,7 +85,7 @@ watch(playlist.value, async () => {
   setMediaMetadata()
   
   const root_url = await getSetting('aural_backend_url') || '';
-  audio.value.querySelector('source').src = `${root_url}/song/${playlist.value.current.path}`
+  audio.value.querySelector('source').src = songUrl(root_url, playlist.value.current.path)
   audio.value.load()
   audio.value.play()
 });
@@ -111,13 +142,25 @@ onMounted(() => {
       updatePositionState()
 
       if(playlist.value.list.length > 1) {
-        try {
-            const root_url = await getSetting('aural_backend_url') || '';
-          fetch(`${root_url}/song/${playlist.value.list[1].path}`)
-        } catch (error) {
-
-        }
+        // Prefetch the next track so it's cached; failures don't matter here
+        const root_url = await getSetting('aural_backend_url') || '';
+        fetch(songUrl(root_url, playlist.value.list[1].path)).catch(() => {})
       }
+<<<<<<< HEAD
+=======
+
+
+      navigator.mediaSession.metadata = new window.MediaMetadata({
+        title: playlist.value.current.path.replace(/.*\/.*\/[0-9]+ ?(.*)\..+/, '$1'),
+        artist: playlist.value.current.path.replace(/(.*)\/.*\/[0-9]+ ?.*\..+/, '$1'),
+        album: playlist.value.current.path.replace(/.*\/(.*)\/[0-9]+ ?.*\..+/, '$1'),
+        artwork: [
+          {
+            src: playlist.value.current.cover_art,
+          },
+        ],
+      });
+>>>>>>> a251a88004ce5fc7220c51e46061c52e6c757cf3
     });
 
     navigator.mediaSession.setActionHandler("play", () => {
@@ -182,6 +225,7 @@ onUnmounted(() => {
         </p>
       </div>
     </section>
+<<<<<<< HEAD
     <section class="page-content">      
       <RouterView v-if="mounted">
         <template #default="{ Component }">
@@ -190,6 +234,11 @@ onUnmounted(() => {
           </KeepAlive>
         </template>
       </RouterView>
+=======
+    <section class="page-content" ref="pageContent">
+      <!-- Keyed so each artist/album gets a fresh page that loads its own data -->
+      <RouterView v-if="mounted" :key="route.fullPath" :current_track_status="current_track_status" />
+>>>>>>> a251a88004ce5fc7220c51e46061c52e6c757cf3
     </section>
     <section id="page-footer">
       <!--BLANK-->
@@ -227,6 +276,8 @@ main>section {
 .page-content {
   display:flex;
   flex-direction:column;
+  /* Lets pages size things (like the artist A–Z index) to the visible area with cqh */
+  container-type:size;
 }
 .page-content>:first-child {
   flex:1;

@@ -6,13 +6,13 @@ import { setSetting, getSetting } from '../indexeddb';
 const state = reactive({
   security_token: '',
   aural_backend_url: '',
-  load_album_art_from_spotify: false,
 })
 
 const status = ref('')
 
 function loadArtists() {
-  navigator.wakeLock.request()
+  // Keep the screen on during a long sync where supported; the sync works without it
+  navigator.wakeLock?.request('screen').catch(() => {})
   navigator.serviceWorker.ready.then( registration => {
     registration.active.postMessage({
         action: 'sync_tracks'
@@ -29,15 +29,10 @@ watch(() => state.aural_backend_url, (newUrl) => {
   setSetting('aural_backend_url', newUrl)
 });
 
-watch(() => state.load_album_art_from_spotify, (newValue) => {
-  setSetting('load_album_art_from_spotify', newValue)
-});
-
 onMounted(async () => {
   // Load settings from IndexedDB
   state.security_token = await getSetting('security_token') || '';
   state.aural_backend_url = await getSetting('aural_backend_url') || '';
-  state.load_album_art_from_spotify = await getSetting('load_album_art_from_spotify') || false;
 
   const bc = new BroadcastChannel("status");
   bc.addEventListener('message', event => {
@@ -60,10 +55,6 @@ onMounted(async () => {
           <label>Security Token</label>
           <input type="text" v-model="state.security_token">
         </fieldset>     
-        <fieldset>
-          <label>Load Album Art from Spotify</label>
-          <input v-model="state.load_album_art_from_spotify" type="checkbox">
-        </fieldset>
 
         <button type="button" style="width:6rem;margin-left:auto;opacity:0.5;padding-block:0.5rem;" @click="loadArtists()">Sync Music</button>
 

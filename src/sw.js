@@ -1,12 +1,11 @@
 import { cleanupOutdatedCaches, precacheAndRoute, matchPrecache, createHandlerBoundToURL } from 'workbox-precaching'
 import { NavigationRoute, registerRoute } from 'workbox-routing';
-import {albumArt} from './album_art.js'
-import {CacheFirst} from 'workbox-strategies';
 import { openDB, deleteDB, wrap, unwrap } from 'idb';
+import { songUrl } from './song_url.js'
 
 self.addEventListener('install', async event => {
     console.log('SERVICE WORKER installing…');
-    
+
     const channel = new BroadcastChannel('sw-messages');
     channel.postMessage({ title: 'installing_update' });
 });
@@ -23,10 +22,6 @@ precacheAndRoute(self.__WB_MANIFEST)
 
 // registerRoute(new NavigationRoute(createHandlerBoundToURL('/index.html')))
 
-registerRoute(
-    ({url}) => url.host === 'i.scdn.co',
-    new CacheFirst()
-  );
 
 
 
@@ -43,113 +38,117 @@ self.addEventListener('activate', event => {
 });
 
 
-self.addEventListener('fetch', async function (event) {
+// respondWith() must be called synchronously, so decide which requests to handle
+// from the URL alone, and check the backend URL setting inside the response promise
+self.addEventListener('fetch', function (event) {
     const url = new URL(event.request.url)
-    if (event.request.url.includes('/song/')) {
-
-        if (event.request.headers.get('range')) {
-            event.respondWith(returnRangeRequest(event.request, 'song'));
-        } else {
-            event.respondWith((async () => {
-                // Cache, with fallback to network and cache response
-                const cache = await caches.open('song')
-                let response = await cache.match(event.request)
-                if(!response) {
-                    bc.postMessage(`Fetch ${url.pathname.replace('/song/', '')}`)
-                    // Use fetchWithAuth here
-                    response = await fetchWithAuth(event.request.url)
-                    await cache.put(event.request, response.clone())
-
-                    self.clients.matchAll().then(all => all.map(client => client.postMessage({
-                        type: 'cache_update',
-                        song: event.request.url
-                    })))
-                    
-                    bc.postMessage(``)
-                }
-                return response
-            })())
-        } 
-        
-    } else {
-        const root_url = await getSetting('aural_backend_url') || '';
-        if (root_url && event.request.url.indexOf(root_url) !== -1) {
+    if (url.pathname.includes('/song/')) {
+        event.respondWith(songResponse(event.request))
+    } else if (url.origin !== self.location.origin) {
+        event.respondWith((async () => {
+            const root_url = await getSetting('aural_backend_url') || '';
+            if (!root_url || !event.request.url.startsWith(root_url)) {
+                return fetch(event.request)
+            }
             console.log('Fallback fetching', event.request.url, url.pathname)
             // Network only with cache fallback (only works for cached resources)
-            event.respondWith((async () => {
-                try {
-                    // Try network fetch with auth
-                    const networkResponse = await fetchWithAuth(event.request);
-                    // Cache successful responses for offline fallback
-                    if (networkResponse && networkResponse.ok) {
-                        const cache = await caches.open('runtime');
-                        cache.put(event.request, networkResponse.clone()).catch(() => {});
-                    }
-                    return networkResponse;
-                } catch (err) {
-                    // Network failed — fall back to cache (only works for previously cached resources)
-                    const cached = await caches.match(event.request);
-                    if (cached) return cached;
-                    return new Response('Offline', { status: 504, statusText: 'Gateway Timeout' });
+            try {
+                // Try network fetch with auth
+                const networkResponse = await fetchWithAuth(event.request);
+                // Cache successful responses for offline fallback
+                if (networkResponse && networkResponse.ok) {
+                    const cache = await caches.open('runtime');
+                    cache.put(event.request, networkResponse.clone()).catch(() => {});
                 }
-            })());
-        }
+                return networkResponse;
+            } catch (err) {
+                // Network failed — fall back to cache (only works for previously cached resources)
+                const cached = await caches.match(event.request);
+                if (cached) return cached;
+                return new Response('Offline', { status: 504, statusText: 'Gateway Timeout' });
+            }
+        })());
     }
 });
 
 
-async function returnRangeRequest(request, cacheName) {
-    const cache = await caches.open(cacheName)
-    let response = await cache.match(request.url);
-    if(!response) {
-        // Was fetch(request), but we need to cache the entire file, not stream it    
-        const url = new URL(request.url)            
-        bc.postMessage(`Fetch ${url.pathname.replace('/song/', '')}`)
-        // Use fetchWithAuth here
-        response = await fetchWithAuth(request.url)
-        bc.postMessage(``)
-        const clonedRes = response.clone();
-        await cache.put(request.url, clonedRes)
+// Songs and album art: serve the whole file from the cache, downloading and caching it first
+// if needed. Only successful downloads are cached, so an error can't get stuck in the cache.
+const songDownloads = new Map()
 
-        self.clients.matchAll().then(all => all.map(client => client.postMessage({
-            type: 'cache_update',
-            song: request.url
-        })))
+async function cachedSong(url) {
+    const cache = await caches.open('song')
+    const cached = await cache.match(url)
+    if (cached) return cached
+
+    // The player often makes several range requests at once; download the file only once
+    if (!songDownloads.has(url)) {
+        songDownloads.set(url, (async () => {
+            bc.postMessage(`Fetch ${decodeURIComponent(new URL(url).pathname.replace(/.*\/song\//, ''))}`)
+            try {
+                const response = await fetchWithAuth(url)
+                if (response.status === 200) {
+                    await cache.put(url, response.clone())
+                    notifyClients({ type: 'cache_update', song: url })
+                }
+                return response
+            } finally {
+                bc.postMessage(``)
+                songDownloads.delete(url)
+            }
+        })())
     }
-    
+    return (await songDownloads.get(url)).clone()
+}
+
+async function songResponse(request) {
+    const response = await cachedSong(request.url)
+
+    const range = request.headers.get('range')
+    if (!range || !response.ok) return response
+
     const arrayBuffer = await response.arrayBuffer();
-    const bytes = /^bytes=(\d+)-(\d+)?$/g.exec( request.headers.get('range') );
-    if (bytes) {
-        const start = Number(bytes[1]);
-        const end = Number(bytes[2]) || arrayBuffer.byteLength - 1;
-        return new Response(arrayBuffer.slice(start, end + 1), {
-            status: 206,
-            statusText: 'Partial Content',
-            headers: [
-                ['Content-Range', `bytes ${start}-${end}/${arrayBuffer.byteLength}`]
-            ]
-        });
-    } else {
+    const size = arrayBuffer.byteLength
+    const bytes = /^bytes=(\d+)-(\d+)?$/.exec(range);
+    const start = bytes ? Number(bytes[1]) : 0
+    const end = bytes && bytes[2] ? Math.min(Number(bytes[2]), size - 1) : size - 1
+    if (!bytes || start > end) {
         return new Response(null, {
             status: 416,
             statusText: 'Range Not Satisfiable',
             headers: [
-                ['Content-Range', `*/${arrayBuffer.byteLength}`]
+                ['Content-Range', `bytes */${size}`]
             ]
         });
     }
+    return new Response(arrayBuffer.slice(start, end + 1), {
+        status: 206,
+        statusText: 'Partial Content',
+        headers: [
+            ['Content-Type', response.headers.get('Content-Type') || ''],
+            ['Content-Length', `${end - start + 1}`],
+            ['Content-Range', `bytes ${start}-${end}/${size}`]
+        ]
+    });
+}
+
+function notifyClients(message) {
+    return self.clients.matchAll().then(clients => clients.forEach(client => client.postMessage(message)))
 }
 
 
 
-self.addEventListener('message', async event => {
+self.addEventListener('message', event => {
+    // waitUntil keeps the service worker alive until the work is done (e.g. a long sync)
+    event.waitUntil(handleMessage(event).catch(err => console.error('[SW]', event.data.action, err)))
+})
+
+async function handleMessage(event) {
     console.info('[SW]', event.data.action)
     switch (event.data.action) {
         case 'sync_tracks': {
+            // sync_tracks tells every client when it's done
             await sync_tracks()
-            event.source.postMessage({
-                type: 'sync_complete'
-            })
             break;
         }
         case 'get_artists': {
@@ -180,18 +179,17 @@ self.addEventListener('message', async event => {
             break;
         }
         case 'delete_track': {
-            const db = await initDatabase()
-            const tx = db.transaction('tracks', 'readwrite')
-            const store = tx.objectStore('tracks')
+            const root_url = await getSetting('aural_backend_url') || '';
             const track = event.data.track
-            console.log('SW delete from catch', track)
-            caches.open('song').then(cache => cache.delete(`/song/${track.path}`))
+            console.log('SW delete from cache', track)
+            await caches.open('song').then(cache => cache.delete(songUrl(root_url, track.path)))
             event.source.postMessage({
                 type: 'cache_update',
             })
+            break;
         }
     }
-})
+}
 
 async function list_artists() {
     const db = await initDatabase()
@@ -261,141 +259,105 @@ async function fetchWithAuth(url, options = {}) {
 }
 
 async function get_artist_album(artist, album) {
-    const db = await initDatabase()
-
-    const data = await new Promise((resolve, reject) => {
-
-        const results = []
-        const promises = []
-        const range = IDBKeyRange.bound([artist, album], [artist, album])
-        const request = db.transaction('tracks', 'readonly').objectStore('tracks').index('artist_album').openCursor(range)
-        request.onsuccess = async (event) => {
-            const cursor = event.target.result
-            if(cursor) {
-                const track = cursor.value
-                // Check cached version matches length
-                promises.push(caches.match(`/song/${track.path}`).then(async response => {
-                    console.log('TTT', response, track.size)
-                    if(response && response.headers.get('Content-Length') != track.size){         
-                        console.log('Clearing cache due to unmatching sizes', track.path)
-                        promises.push(caches.open('song').then(cache => cache.delete(`/song/${track.path}`).then(del => console.log('Deleted:', track.path, del))))
-                    }
-                }))
-                results.push(track)
-                cursor.continue()
-            } else {
-                results.sort((a, b) => parseInt(a.track) - parseInt(b.track))
-                console.log('TRACKS', results)
-                await Promise.all(promises)
-                resolve(results)
-            }
-        }
-        request.onerror = reject
-    })
-
+    const db = wrap(await initDatabase())
     const root_url = await getSetting('aural_backend_url') || '';
 
-    return Promise.all(data.map(async track => {
-        track.available_offline = await caches.match(`${root_url}/song/${artist}/${album}/${track.track}`).then(Boolean)
+    const tracks = await db.getAllFromIndex('tracks', 'artist_album', [artist, album])
+    tracks.sort((a, b) => parseInt(a.track) - parseInt(b.track))
+
+    const cache = await caches.open('song')
+    return Promise.all(tracks.map(async track => {
+        const url = songUrl(root_url, track.path)
+        const cached = await cache.match(url)
+        const length = cached?.headers.get('Content-Length')
+        // The file changed on the server since it was cached, so drop the old copy
+        if (cached && length !== null && length != track.size) {
+            console.log('Clearing cache due to unmatching sizes', track.path)
+            await cache.delete(url)
+            track.available_offline = false
+        } else {
+            track.available_offline = Boolean(cached)
+        }
         return track
     }))
 }
 
-async function sync_tracks() {
+// Sync the local track list with the backend. If a sync is already running, wait for that one.
+let syncInProgress = null
 
-    bc.postMessage('Init Database')
-
-    const db = wrap(await initDatabase())
-
-    bc.postMessage('Fetching Data')
-    const root_url = await getSetting('aural_backend_url') || '';
-
-    // Use fetchWithAuth here
-    const response = await fetchWithAuth(`${root_url}/artists?time=${Date.now()}`)
-    if (!response.status === 200) {        
-        bc.postMessage('Fetch ERROR')
-        throw new Error('Error fetching tracks');
+function sync_tracks() {
+    if (!syncInProgress) {
+        syncInProgress = run_sync().finally(() => { syncInProgress = null })
     }
-    
-    bc.postMessage('Fetch Complete')
+    return syncInProgress
+}
 
-    const data = await response.json()
+async function run_sync() {
+    try {
+        bc.postMessage('Fetching Data')
+        const root_url = await getSetting('aural_backend_url') || '';
 
-    const promises = []
+        const response = await fetchWithAuth(`${root_url}/artists?time=${Date.now()}`)
+        if (!response.ok) {
+            throw new Error(`Backend returned ${response.status} ${response.statusText}`)
+        }
+        const data = await response.json()
+        if (!Array.isArray(data)) {
+            throw new Error('Unexpected response from backend')
+        }
 
-    bc.postMessage('Clearing Database')
+        bc.postMessage('Processing Artists')
 
-    bc.postMessage('Processing Artists')
-    for(const artist of data) {
-        bc.postMessage(`Processing ${artist.artist}`)
-        for (const album of artist.albums) {
-            const range = IDBKeyRange.bound([artist.artist, album.album], [artist.artist, album.album])
-            let cursor = await db.transaction('tracks').store.index('artist_album').openCursor(range)
-            
-            const tracks = []
-            let existing_album_art = null;
-            while(cursor) {
-                console.log(cursor.value)
-                tracks.push(cursor.value.path)
-                existing_album_art = cursor.value.cover_art;
-                cursor = await cursor.continue()
-            }
-                     
-            if(JSON.stringify(tracks) == JSON.stringify(album.tracks.map(track => `${artist.artist}/${album.album}/${track.track}`))) {
-                // Skip this album
-                bc.postMessage(`SKIP ${album.album}`)
-                console.log(`SKIP ${album.album}`)
-            } else {
-                
-                bc.postMessage(`Processing ${artist.artist} - ${album.album}`)
-                console.log(`ADD ${album.album}`)
-                // Delete and add this album?
-                let art = '';
-                if(album.cover_art){
-                    art = `${root_url}/${album.cover_art}`;
-                    // Only check spotify if the stored album doesnt already have cover_art
-                } else if(!existing_album_art) {
-                    try {
-                    art = await albumArt(artist.artist, { album: album.album})
-                    } catch(e) {
-                        console.error('Error fetching album art', e)
-                    }
-                }
-
+        // What the local track list should look like after the sync
+        const wanted = new Map()
+        for (const artist of data) {
+            for (const album of artist.albums) {
+                const cover_art = album.cover_art ? `${root_url}/${album.cover_art}` : ''
                 for (const track of album.tracks) {
-                    await db.put('tracks', {
-                        path: `${artist.artist}/${album.album}/${track.track}`,
+                    const path = `${artist.artist}/${album.album}/${track.track}`
+                    wanted.set(path, {
+                        path,
                         artist: artist.artist,
                         album: album.album,
                         track: track.track,
                         size: track.size,
-                        cover_art: art
+                        cover_art
                     })
                 }
-
-                // Get tracks from this album, and delete any which are not in the current list
-                const range = IDBKeyRange.bound([artist.artist, album.album], [artist.artist, album.album])
-                let cursor = await db.transaction('tracks').store.index('artist_album').openCursor(range)
-                while(cursor) {
-                    if(!album.tracks.find(track => track.track == cursor.value.track)) {
-                        console.log('DELETE', cursor.value)
-                        await db.delete('tracks', cursor.value.path)
-                    }
-                    cursor = await cursor.continue()
-                }
-                
-
-                console.log('Finished adding album')
             }
         }
-    }
-    bc.postMessage('Sync Complete')
 
-    self.clients.matchAll().then(clients => {
-        clients.forEach(client => client.postMessage({
-            type: 'sync_complete'
-        }));
-    })
+        const db = wrap(await initDatabase())
+        const existing = new Map((await db.getAll('tracks')).map(track => [track.path, track]))
+
+        const puts = [...wanted.values()].filter(track => {
+            const old = existing.get(track.path)
+            return !old || old.size !== track.size || old.cover_art !== track.cover_art
+        })
+        const deletes = [...existing.keys()].filter(path => !wanted.has(path))
+
+        // Cached copies of removed or changed files are out of date
+        const stale = [...deletes, ...puts.filter(track => existing.has(track.path) && existing.get(track.path).size !== track.size).map(track => track.path)]
+
+        bc.postMessage(`Saving ${puts.length} changed, removing ${deletes.length} old tracks`)
+
+        // Apply every change in one transaction, so the list is never left half-updated
+        const tx = db.transaction('tracks', 'readwrite')
+        for (const track of puts) tx.store.put(track)
+        for (const path of deletes) tx.store.delete(path)
+        await tx.done
+
+        const cache = await caches.open('song')
+        await Promise.all(stale.map(path => cache.delete(songUrl(root_url, path))))
+
+        console.log('Sync complete', { added_or_changed: puts.length, removed: deletes.length })
+        bc.postMessage('Sync Complete')
+        await notifyClients({ type: 'sync_complete' })
+    } catch (err) {
+        console.error('Sync failed', err)
+        bc.postMessage(`Sync failed: ${err.message}`)
+        await notifyClients({ type: 'sync_complete', error: err.message })
+    }
 }
 
 
@@ -452,8 +414,9 @@ function initDatabase() {
                     }
                 }
             }
+            // Don't resolve here: the upgrade transaction is still running, so the database can't
+            // be used yet. onsuccess fires once the upgrade has finished.
             console.info(`IndexedDB upgrade completed`)
-            resolve(db)
         }
     })
 }
