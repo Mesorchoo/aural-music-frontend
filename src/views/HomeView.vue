@@ -39,6 +39,9 @@ const mounted = ref(false)
 const song = ref(false)
 const status = ref('')
 const art = ref(logoURL)
+// Quoted, because encodeURIComponent leaves ( ) ' unescaped. An unquoted url() containing
+// those is invalid CSS, so the browser drops the new --bg and keeps showing the old art.
+const artCss = computed(() => `url("${(art.value || '').replace(/["\\]/g, '\\$&')}")`)
 
 const current_track_status = ref(null)
 
@@ -174,12 +177,15 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <main :style="{'--bg': `url(${art})` }">
+  <main :style="{'--bg': artCss }">
     <section class="current">
 
       <div style="display:flex;gap:0.5rem;align-items: center;padding-left:0.5rem;">
         <p style="white-space: nowrap;overflow:hidden;text-overflow: ellipsis;margin:0;">{{ status }}</p>
-        <RouterLink :to="{name: 'settings'}" style="width:2rem;margin-left:auto;flex:0 0 2rem;">
+        <RouterLink :to="{name: 'playlists'}" title="Playlists" style="width:2rem;margin-left:auto;flex:0 0 2rem;">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><title>playlist-music</title><path fill="white" d="M15,6H3V8H15V6M15,10H3V12H15V10M3,16H11V14H3V16M17,6V14.18C16.69,14.07 16.35,14 16,14A3,3 0 0,0 13,17A3,3 0 0,0 16,20A3,3 0 0,0 19,17V8H22V6H17Z" /></svg>
+        </RouterLink>
+        <RouterLink :to="{name: 'settings'}" style="width:2rem;flex:0 0 2rem;">
           <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><title>dots-vertical</title><path fill="white" d="M12,16A2,2 0 0,1 14,18A2,2 0 0,1 12,20A2,2 0 0,1 10,18A2,2 0 0,1 12,16M12,10A2,2 0 0,1 14,12A2,2 0 0,1 12,14A2,2 0 0,1 10,12A2,2 0 0,1 12,10M12,4A2,2 0 0,1 14,6A2,2 0 0,1 12,8A2,2 0 0,1 10,6A2,2 0 0,1 12,4Z" /></svg>
         </RouterLink>  
       </div>

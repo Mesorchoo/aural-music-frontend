@@ -9,11 +9,12 @@
                 <h1>{{ props.album }}</h1>
                 <RouterLink class="artist-link" :to="{ name: 'artist', params: { artist: props.artist } }">{{ props.artist }}</RouterLink>
                 <p v-if="state.loaded" class="count">{{ state.tracks.length }} {{ state.tracks.length === 1 ? 'track' : 'tracks' }}</p>
+                <button v-if="state.tracks.length" type="button" class="add-album" @click="state.adding = state.tracks.map(track => track.path)">+ Add to playlist</button>
             </div>
         </header>
 
-        <template v-for="track in state.tracks" :key="track.path">
-            <button type="button" @click="play(track)" @touchstart="touchstart(track)" @touchend="touchend(track)" :class="{ playing: playlist.current.path == track.path }">
+        <div v-for="track in state.tracks" :key="track.path" class="row">
+            <button type="button" class="track" @click="play(track)" @touchstart="touchstart(track)" @touchend="touchend(track)" :class="{ playing: playlist.current.path == track.path }">
                 <span class="number">{{ trackParts(track).number }}</span>
                 <span class="title">{{ trackParts(track).title }}</span>
                 <template v-if="playlist.current.path == track.path">
@@ -26,12 +27,15 @@
                 </template>
                 <span v-else-if="track.available_offline" class="available_offline"></span>
             </button>
-        </template>
+            <button type="button" class="add" :aria-label="`Add ${trackParts(track).title} to playlist`" @click="state.adding = [track.path]">+</button>
+        </div>
     </div>
+    <AddToPlaylist :tracks="state.adding" @close="state.adding = []" />
     <Teleport to="#page-footer">
         <div class="footer-controls">
             <RouterLink :to="{ name: 'artists' }">Artists</RouterLink>
             <RouterLink :to="{ name: 'artist', params: { artist: props.artist } }">{{ props.artist }}</RouterLink>
+            <RouterLink :to="{ name: 'playlists' }">Playlists</RouterLink>
         </div>
     </Teleport>
 </template>
@@ -41,6 +45,8 @@ import { reactive, computed, inject, onBeforeMount, onBeforeUnmount } from 'vue'
 import { usePlaylistStore } from '../stores/playlist';
 import { setSetting, getSetting } from '../indexeddb';
 import { songUrl } from '../song_url';
+import { trackParts } from '../track_name';
+import AddToPlaylist from '../components/AddToPlaylist.vue';
 
 const playlistStore = usePlaylistStore()
 
@@ -58,6 +64,8 @@ const state = reactive({
     tracks: [],
     loaded: false,
     brokenArt: false,
+    // Track paths waiting to be added to a playlist; the playlist picker shows while non-empty
+    adding: [],
     touch: {
         start: 0,
         end: 0,
@@ -66,13 +74,6 @@ const state = reactive({
 });
 
 const coverArt = computed(() => state.tracks[0]?.cover_art)
-
-// "01 - Song Name.flac" -> { number: '1', title: 'Song Name' }
-function trackParts(track) {
-    const match = track.track.match(/^([0-9]+)[\s.\-_]*(.*?)\.[^.]+$/)
-    if (match && match[2]) return { number: String(parseInt(match[1], 10)), title: match[2] }
-    return { number: '', title: track.track.replace(/\.[^.]+$/, '') }
-}
 
 function touchstart(track) {
     state.touch.start = Date.now()
@@ -207,17 +208,40 @@ h1 {
     font-size:0.85rem;
     color:#fff9;
 }
+.add-album {
+    margin-top:0.5rem;
+    background-color:#fff2;
+    border:none;
+    border-radius:0.5rem;
+    color:#fffc;
+    font-size:0.85rem;
+    padding:0.35rem 0.75rem;
+}
 
 
-button {
+.row {
+    display:flex;
+    align-items:center;
+    border-bottom:solid 1px #fff1;
+}
+.add {
+    flex:0 0 2.5rem;
+    height:2.5rem;
+    background-color:#0000;
+    border:none;
+    color:#fff8;
+    font-size:1.4rem;
+}
+button.track {
+    flex:1;
+    min-width:0;
     background-color: #0000;
     border:none;
     font-size:min(1rem, 4vw);
     min-height:3rem;
-    padding:0.5rem 1rem;
+    padding:0.5rem 0.5rem 0.5rem 1rem;
     color:#fff;
     text-align:left;
-    border-bottom:solid 1px #fff1;
     display:grid;
     grid-template-columns:1.75rem 1fr auto;
     gap:0.5rem;

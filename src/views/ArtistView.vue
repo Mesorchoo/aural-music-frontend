@@ -20,6 +20,7 @@
     <Teleport to="#page-footer">
         <div class="footer-controls">
             <RouterLink :to="{ name: 'artists' }">Artists</RouterLink>
+            <RouterLink :to="{ name: 'playlists' }">Playlists</RouterLink>
         </div>
     </Teleport>
 </template>

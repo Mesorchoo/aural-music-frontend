@@ -1,17 +1,8 @@
+import { openDatabase } from './db.js'
 
 // IndexedDB helpers
 export function openSettingsDB() {
-  return new Promise((resolve, reject) => {
-    const request = indexedDB.open('musicapp-idb', 2);
-    request.onerror = () => reject(request.error);
-    request.onsuccess = () => resolve(request.result);
-    request.onupgradeneeded = (event) => {
-      const db = event.target.result;
-      if (!db.objectStoreNames.contains('settings')) {
-        db.createObjectStore('settings', { keyPath: 'key' });
-      }
-    };
-  });
+  return openDatabase();
 }
 
 export function getSetting(key) {
@@ -36,4 +27,48 @@ export function setSetting(key, value) {
       req.onerror = reject;
     });
   });
+}
+
+// Count the distinct keys of an index, e.g. how many different artists there are
+function countUnique(index) {
+  return new Promise((resolve, reject) => {
+    let count = 0;
+    const req = index.openKeyCursor(null, 'nextunique');
+    req.onsuccess = () => {
+      if (!req.result) return resolve(count);
+      count++;
+      req.result.continue();
+    };
+    req.onerror = reject;
+  });
+}
+
+function countAll(store) {
+  return new Promise((resolve, reject) => {
+    const req = store.count();
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = reject;
+  });
+}
+
+function getAll(store) {
+  return new Promise((resolve, reject) => {
+    const req = store.getAll();
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = reject;
+  });
+}
+
+// Totals for the synced library, as of the last sync
+export async function getLibraryStats() {
+  const db = await openDatabase();
+  const tx = db.transaction(['tracks', 'playlists'], 'readonly');
+  const tracks = tx.objectStore('tracks');
+  const [artists, albums, trackCount, playlists] = await Promise.all([
+    countUnique(tracks.index('artist')),
+    countUnique(tracks.index('artist_album')),
+    countAll(tracks),
+    getAll(tx.objectStore('playlists')),
+  ]);
+  return { artists, albums, tracks: trackCount, playlists: playlists.filter(playlist => !playlist.deleted).length };
 }

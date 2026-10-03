@@ -4,6 +4,8 @@ import HomeView from '../views/HomeView.vue'
 import AlbumView from '../views/AlbumView.vue'
 import ArtistsView from '../views/ArtistsView.vue'
 import ArtistView from '../views/ArtistView.vue'
+import PlaylistsView from '../views/PlaylistsView.vue'
+import PlaylistView from '../views/PlaylistView.vue'
 
 const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
@@ -29,6 +31,17 @@ const router = createRouter({
           path:'artist/:artist/:album',
           name: 'album',
           component: AlbumView,
+          props: true,
+        },
+        {
+          path:'playlists',
+          name: 'playlists',
+          component: PlaylistsView,
+        },
+        {
+          path:'playlist/:id',
+          name: 'playlist',
+          component: PlaylistView,
           props: true,
         }
       ]
